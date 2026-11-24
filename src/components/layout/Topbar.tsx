@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { useApp } from '../../context/AppContext.tsx';
 import {
@@ -11,6 +12,7 @@ import {
   Check,
   CheckCheck,
   Calendar,
+  LogOut,
 } from 'lucide-react';
 import { Role } from '../../types/index.ts';
 
@@ -27,7 +29,8 @@ export const Topbar: React.FC<TopbarProps> = ({
   title = 'Dashboard',
   sidebarOpen = false,
 }) => {
-  const { currentUser, currentRole, switchRole } = useAuth();
+  const { currentUser, currentRole, switchRole, logout } = useAuth();
+  const navigate = useNavigate();
   const {
     theme,
     toggleTheme,
@@ -246,6 +249,20 @@ export const Topbar: React.FC<TopbarProps> = ({
                     </button>
                   );
                 })}
+              </div>
+
+              <div className="px-2 pt-2 border-t border-slate-800 light:border-slate-200">
+                <button
+                  onClick={() => {
+                    logout();
+                    setRoleMenuOpen(false);
+                    navigate('/login', { replace: true });
+                  }}
+                  className="w-full text-left px-3.5 py-2 flex items-center gap-2 text-xs font-semibold text-red-400 light:text-red-600 hover:bg-red-500/10 light:hover:bg-red-50 transition-colors rounded-lg"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  Log out
+                </button>
               </div>
             </div>
           )}

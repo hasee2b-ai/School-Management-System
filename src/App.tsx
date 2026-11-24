@@ -19,6 +19,7 @@ import { CommunicationPage } from './pages/CommunicationPage.tsx';
 import { ReportsPage } from './pages/ReportsPage.tsx';
 import { SettingsPage } from './pages/SettingsPage.tsx';
 import { LoginPage } from './pages/LoginPage.tsx';
+import { RequireAuth } from './components/auth/RequireAuth.tsx';
 
 export default function App() {
   return (
@@ -27,22 +28,24 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
-            <Route path="/" element={<AppShell />}>
-              <Route index element={<DashboardPage />} />
-              <Route path="students" element={<StudentsPage />} />
-              <Route path="teachers" element={<TeachersPage />} />
-              <Route path="classes" element={<ClassesPage />} />
-              <Route path="subjects" element={<SubjectsPage />} />
-              <Route path="attendance" element={<AttendancePage />} />
-              <Route path="timetable" element={<TimetablePage />} />
-              <Route path="exams" element={<ExamsPage />} />
-              <Route path="assignments" element={<AssignmentsPage />} />
-              <Route path="fees" element={<FeesPage />} />
-              <Route path="library" element={<LibraryPage />} />
-              <Route path="transport" element={<TransportPage />} />
-              <Route path="communication" element={<CommunicationPage />} />
-              <Route path="reports" element={<ReportsPage />} />
-              <Route path="settings" element={<SettingsPage />} />
+            <Route path="/" element={<RequireAuth />}>
+              <Route element={<AppShell />}>
+                <Route index element={<DashboardPage />} />
+                <Route path="students" element={<StudentsPage />} />
+                <Route path="teachers" element={<TeachersPage />} />
+                <Route path="classes" element={<ClassesPage />} />
+                <Route path="subjects" element={<SubjectsPage />} />
+                <Route path="attendance" element={<AttendancePage />} />
+                <Route path="timetable" element={<TimetablePage />} />
+                <Route path="exams" element={<ExamsPage />} />
+                <Route path="assignments" element={<AssignmentsPage />} />
+                <Route path="fees" element={<FeesPage />} />
+                <Route path="library" element={<LibraryPage />} />
+                <Route path="transport" element={<TransportPage />} />
+                <Route path="communication" element={<CommunicationPage />} />
+                <Route path="reports" element={<ReportsPage />} />
+                <Route path="settings" element={<SettingsPage />} />
+              </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState } from 'react';
 import { User, Role } from '../types/index.ts';
 import { INITIAL_USERS } from '../data/mockData.ts';
 
@@ -16,23 +16,39 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const AUTH_USER_KEY = 'smc_auth_user';
 
+// A saved session is only valid if it parses and its id matches a canonical user.
+function readSavedUser(): User | null {
+  try {
+    const saved = localStorage.getItem(AUTH_USER_KEY);
+    if (!saved) return null;
+    const parsed = JSON.parse(saved) as { id?: unknown } | null;
+    if (!parsed || typeof parsed.id !== 'string') return null;
+    return INITIAL_USERS.find((u) => u.id === parsed.id) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function persistUser(user: User): void {
+  try {
+    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
+  } catch (e) {
+    console.warn('Could not save auth user', e);
+  }
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<User>(() => {
-    try {
-      const saved = localStorage.getItem(AUTH_USER_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.warn('Could not read saved auth user', e);
-    }
-    // Default to Super Admin for initial experience
-    return INITIAL_USERS[0];
+  // Keep currentUser non-null (placeholder until login) and gate the UI with isAuthenticated.
+  // This avoids touching every consumer that reads currentUser.name / .role / .id.
+  const [session, setSession] = useState(() => {
+    const saved = readSavedUser();
+    return {
+      user: saved ?? INITIAL_USERS[0],
+      isAuthenticated: saved !== null,
+    };
   });
 
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
-
-  useEffect(() => {
-    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(currentUser));
-  }, [currentUser]);
+  const { user: currentUser, isAuthenticated } = session;
 
   const switchRole = (role: Role) => {
     const targetUser = INITIAL_USERS.find((u) => u.role === role) || {
@@ -41,17 +57,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       email: `${role}@staugustine.edu`,
       role,
     };
-    setCurrentUser(targetUser);
-    setIsAuthenticated(true);
+    persistUser(targetUser);
+    setSession({ user: targetUser, isAuthenticated: true });
   };
 
   const loginAs = (user: User) => {
-    setCurrentUser(user);
-    setIsAuthenticated(true);
+    persistUser(user);
+    setSession({ user, isAuthenticated: true });
   };
 
   const logout = () => {
-    setIsAuthenticated(false);
+    try {
+      localStorage.removeItem(AUTH_USER_KEY);
+    } catch (e) {
+      console.warn('Could not clear saved auth user', e);
+    }
+    setSession((prev) => ({ ...prev, isAuthenticated: false }));
   };
 
   return (

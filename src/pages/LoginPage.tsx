@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.tsx';
 import { User, Role } from '../types/index.ts';
 import { Button } from '../components/common/Button.tsx';
@@ -8,14 +8,28 @@ import { Shield, Sparkles, Check, ArrowRight, Lock } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
-  const { availableUsers, loginAs, switchRole } = useAuth();
+  const { availableUsers, loginAs, switchRole, isAuthenticated } = useAuth();
 
   const [email, setEmail] = useState('alexander.cross@staugustine.edu');
   const [password, setPassword] = useState('••••••••••••');
+  const [error, setError] = useState('');
+
+  if (isAuthenticated) {
+    return <Navigate to="/" replace />;
+  }
 
   const handleCustomLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    const matched = availableUsers.find((u) => u.email.toLowerCase() === email.toLowerCase()) || availableUsers[0];
+    if (!password.trim()) {
+      setError('Please enter a password to continue.');
+      return;
+    }
+    const matched = availableUsers.find((u) => u.email.toLowerCase() === email.trim().toLowerCase());
+    if (!matched) {
+      setError('No account found for this email');
+      return;
+    }
+    setError('');
     loginAs(matched);
     navigate('/');
   };
@@ -52,7 +66,10 @@ export const LoginPage: React.FC = () => {
               label="Academic Email Address"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setError('');
+              }}
               placeholder="name@staugustine.edu"
               required
             />
@@ -76,7 +93,10 @@ export const LoginPage: React.FC = () => {
               <input
                 type="password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  setError('');
+                }}
                 className="block w-full rounded-lg bg-slate-900/80 light:bg-white text-slate-100 light:text-slate-900 border border-slate-800 light:border-slate-300 px-3.5 py-2 text-sm focus:border-indigo-500 focus:outline-none"
               />
             </div>
@@ -84,7 +104,16 @@ export const LoginPage: React.FC = () => {
             <Button type="submit" className="w-full mt-2" size="lg">
               Sign In to Console
             </Button>
+            {error && (
+              <p role="alert" className="text-xs font-medium text-red-400 light:text-red-600">
+                {error}
+              </p>
+            )}
           </form>
+
+          <p className="mt-3 text-center text-[11px] text-slate-400 light:text-slate-600">
+            Demo mode — any password works; or use a 1-click role below.
+          </p>
 
           {/* Quick Demo Accounts Selection */}
           <div className="mt-8 pt-6 border-t border-slate-800/80 light:border-slate-200">

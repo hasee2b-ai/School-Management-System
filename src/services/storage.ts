@@ -151,6 +151,14 @@ export const StorageService = {
   saveSettings: (data: SchoolSettings) => save('settings', data),
 
   resetAllToDemo: (): void => {
+    // Auth accounts and audit history are reset alongside the users so seeded logins
+    // always match a user record, and old accounts cannot survive a demo reset.
+    try {
+      localStorage.removeItem('smc_accounts');
+      localStorage.removeItem('smc_audit_log');
+    } catch (e) {
+      console.warn('Failed clearing auth data during demo reset', e);
+    }
     save('users', INITIAL_USERS);
     save('students', INITIAL_STUDENTS);
     save('teachers', INITIAL_TEACHERS);

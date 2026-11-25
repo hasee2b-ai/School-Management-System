@@ -31,7 +31,6 @@ export interface ProvisionInput {
   email: string;
   role: Role;
   associatedId?: string;
-  studentClassId?: string;
 }
 
 /** Demo-only seed data: every seeded account starts with this password. */
@@ -229,15 +228,36 @@ function teacherClassIdsFor(actor: User): string[] {
   return StorageService.getTeachers().find((teacher) => teacher.id === actor.associatedId)?.assignedClassIds ?? [];
 }
 
-function studentClassFor(associatedId?: string, explicitClassId?: string): string | undefined {
-  if (explicitClassId) return explicitClassId;
+/** Class is derived from the student record only - never from caller input. */
+function studentClassFor(associatedId?: string): string | undefined {
   if (!associatedId) return undefined;
   return StorageService.getStudents().find((student) => student.id === associatedId)?.classId;
+}
+
+/** Resolve the actor from persisted users; never trust the role on the passed object. */
+function resolveStoredActor(actor: User): User {
+  const stored = StorageService.getUsers().find((user) => user.id === actor.id);
+  if (!stored || stored.role !== actor.role) {
+    throw new AccountPolicyError('Actor identity could not be verified.');
+  }
+  return stored;
 }
 
 function enforcePolicy(actor: User, target: { role: Role; studentClassId?: string; userId?: string }): void {
   const decision = canProvisionAccount(actor, target, teacherClassIdsFor(actor));
   if (!decision.allowed) throw new AccountPolicyError(decision.reason ?? 'Not allowed.');
+}
+
+function registerFailedAttempt(email: string): void {
+  const key = normalizeEmail(email);
+  const now = Date.now();
+  const previous = failedAttempts.get(key);
+  // A state with lockedUntil === 0 is still accumulating; an expired lock restarts at 1.
+  const count = previous && previous.lockedUntil === 0 ? previous.count + 1 : 1;
+  failedAttempts.set(key, {
+    count,
+    lockedUntil: count >= MAX_FAILED_ATTEMPTS ? now + LOCKOUT_MS : 0,
+  });
 }
 
 export function findAccountByEmail(email: string): Account | null {
@@ -282,10 +302,25 @@ export async function provisionAccount(
 ): Promise<{ user: User; temporaryPassword: string }> {
   await seedAccountsIfMissing();
 
-  const studentClassId = input.role === 'student'
-    ? studentClassFor(input.associatedId, input.studentClassId)
-    : undefined;
-  enforcePolicy(actor, { role: input.role, studentClassId });
+  const storedActor = resolveStoredActor(actor);
+
+  let studentClassId: string | undefined;
+  if (input.role === 'student') {
+    if (!input.associatedId) {
+      throw new AccountPolicyError('A student associatedId is required.');
+    }
+    studentClassId = studentClassFor(input.associatedId);
+    if (!studentClassId) {
+      throw new AccountPolicyError('No existing student matches that associatedId.');
+    }
+  }
+  enforcePolicy(storedActor, { role: input.role, studentClassId });
+
+  if (input.associatedId && StorageService.getUsers().some(
+    (user) => user.associatedId === input.associatedId && user.role === input.role,
+  )) {
+    throw new AccountPolicyError('A user with this associatedId and role already exists.');
+  }
 
   if (!input.name?.trim()) throw new AccountPolicyError('A name is required.');
   const email = validateEmail(input.email);
@@ -310,7 +345,7 @@ export async function provisionAccount(
 
   appendAudit({
     at: new Date().toISOString(),
-    actorId: actor.id,
+    actorId: storedActor.id,
     action: 'provision',
     targetUserId: user.id,
     targetRole: input.role,
@@ -325,12 +360,13 @@ export async function resetPassword(
 ): Promise<{ temporaryPassword: string }> {
   await seedAccountsIfMissing();
 
+  const storedActor = resolveStoredActor(actor);
   const targetUser = StorageService.getUsers().find((user) => user.id === targetUserId);
   if (!targetUser) throw new Error('Target user not found.');
   const studentClassId = targetUser.role === 'student'
     ? studentClassFor(targetUser.associatedId)
     : undefined;
-  enforcePolicy(actor, { role: targetUser.role, studentClassId, userId: targetUser.id });
+  enforcePolicy(storedActor, { role: targetUser.role, studentClassId, userId: targetUser.id });
 
   const accounts = readAccounts() ?? [];
   const account = accounts.find((item) => item.userId === targetUserId);
@@ -346,7 +382,7 @@ export async function resetPassword(
 
   appendAudit({
     at: new Date().toISOString(),
-    actorId: actor.id,
+    actorId: storedActor.id,
     action: 'reset_password',
     targetUserId,
     targetRole: targetUser.role,
@@ -365,7 +401,11 @@ export async function changePassword(
   const account = accounts.find((item) => item.userId === userId);
   if (!account) throw new Error('No account exists for that user.');
 
+  if (getLockRemainingMs(account.email) > 0) {
+    throw new Error('Too many failed attempts. Try again later.');
+  }
   if (await deriveHash(currentPassword, account.salt) !== account.passwordHash) {
+    registerFailedAttempt(account.email);
     throw new Error('Current password is incorrect.');
   }
   if (newPassword.length < 8) throw new Error('New password must be at least 8 characters.');
@@ -421,13 +461,6 @@ export async function verifyLogin(email: string, password: string): Promise<User
     return StorageService.getUsers().find((user) => user.id === account.userId) ?? null;
   }
 
-  const now = Date.now();
-  const previous = failedAttempts.get(key);
-  // A state with lockedUntil === 0 is still accumulating; an expired lock restarts at 1.
-  const count = previous && previous.lockedUntil === 0 ? previous.count + 1 : 1;
-  failedAttempts.set(key, {
-    count,
-    lockedUntil: count >= MAX_FAILED_ATTEMPTS ? now + LOCKOUT_MS : 0,
-  });
+  registerFailedAttempt(key);
   return null;
 }

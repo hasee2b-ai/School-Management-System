@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { webcrypto } from 'node:crypto';
 import { TextEncoder as NodeTextEncoder } from 'node:util';
 import { INITIAL_USERS } from '../data/mockData.ts';
@@ -10,6 +10,7 @@ import {
   DEMO_PASSWORD,
   changePassword,
   findAccountByEmail,
+  findAccountByUserId,
   getLockRemainingMs,
   getMustChangePassword,
   provisionAccount,
@@ -40,6 +41,10 @@ beforeAll(() => {
 
 beforeEach(() => {
   localStorage.clear();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 function allStoredText(): string {
@@ -78,17 +83,17 @@ describe('email validation and provisioning', () => {
     expect(result.user.role).toBe('teacher');
 
     await expect(provisionAccount(superAdmin, {
-      name: 'Duplicate', email: ` ${email} `, role: 'student',
+      name: 'Duplicate', email: ` ${email} `, role: 'teacher',
     })).rejects.toThrow(AccountPolicyError);
     await expect(provisionAccount(superAdmin, {
-      name: 'Invalid', email: 'not-an-email', role: 'student',
+      name: 'Invalid', email: 'not-an-email', role: 'teacher',
     })).rejects.toThrow(AccountPolicyError);
   });
 
   it('rejects duplicate seeded emails regardless of case and spacing', async () => {
     await seedAccountsIfMissing();
     await expect(provisionAccount(superAdmin, {
-      name: 'Clone', email: '  ALEXANDER.CROSS@STAUGUSTINE.EDU ', role: 'student',
+      name: 'Clone', email: '  ALEXANDER.CROSS@STAUGUSTINE.EDU ', role: 'teacher',
     })).rejects.toThrow(AccountPolicyError);
   });
 });
@@ -96,8 +101,8 @@ describe('email validation and provisioning', () => {
 describe('temporary passwords and account storage', () => {
   it('generates distinct 12-char passwords with no look-alikes and stores only hashes', async () => {
     await seedAccountsIfMissing();
-    const first = await provisionAccount(superAdmin, { name: 'One', email: uniqueEmail(), role: 'student' });
-    const second = await provisionAccount(superAdmin, { name: 'Two', email: uniqueEmail(), role: 'student' });
+    const first = await provisionAccount(superAdmin, { name: 'One', email: uniqueEmail(), role: 'teacher' });
+    const second = await provisionAccount(superAdmin, { name: 'Two', email: uniqueEmail(), role: 'teacher' });
 
     for (const password of [first.temporaryPassword, second.temporaryPassword]) {
       expect(password).toHaveLength(12);
@@ -121,7 +126,7 @@ describe('temporary passwords and account storage', () => {
 
   it('adds provisioned users to smc_data_users and re-seeds corrupt user data', async () => {
     await seedAccountsIfMissing();
-    const result = await provisionAccount(superAdmin, { name: 'Dynamic', email: uniqueEmail(), role: 'student' });
+    const result = await provisionAccount(superAdmin, { name: 'Dynamic', email: uniqueEmail(), role: 'teacher' });
     const users = JSON.parse(localStorage.getItem('smc_data_users') ?? '[]') as User[];
     expect(users.some((user) => user.id === result.user.id && user.email === result.user.email)).toBe(true);
 
@@ -130,8 +135,59 @@ describe('temporary passwords and account storage', () => {
   });
 });
 
+describe('student identity is derived from records, never from callers', () => {
+  it('requires an associatedId that matches an existing student', async () => {
+    await seedAccountsIfMissing();
+    await expect(provisionAccount(superAdmin, {
+      name: 'No Id', email: uniqueEmail(), role: 'student',
+    })).rejects.toThrow(/associatedId is required/);
+    await expect(provisionAccount(superAdmin, {
+      name: 'Unknown Id', email: uniqueEmail(), role: 'student', associatedId: 'stu_missing',
+    })).rejects.toThrow(/No existing student/);
+  });
+
+  it('denies an outside-class student id with or without a class hint', async () => {
+    await seedAccountsIfMissing();
+    await expect(provisionAccount(teacher, {
+      name: 'Outside', email: uniqueEmail(), role: 'student', associatedId: 'stu_06', // cls_11
+    })).rejects.toThrow(AccountPolicyError);
+
+    const withHint = {
+      name: 'Outside', email: uniqueEmail(), role: 'student' as const,
+      associatedId: 'stu_06', studentClassId: 'cls_10', // must be ignored
+    } as Parameters<typeof provisionAccount>[1];
+    await expect(provisionAccount(teacher, withHint)).rejects.toThrow(AccountPolicyError);
+  });
+
+  it('allows a teacher to provision a student from an assigned class', async () => {
+    await seedAccountsIfMissing();
+    const created = await provisionAccount(teacher, {
+      name: 'Inside', email: uniqueEmail(), role: 'student', associatedId: 'stu_08', // cls_12
+    });
+    expect(created.user.role).toBe('student');
+    expect(created.user.associatedId).toBe('stu_08');
+  });
+
+  it('rejects a second login for the same associatedId and role', async () => {
+    await seedAccountsIfMissing();
+    await provisionAccount(superAdmin, {
+      name: 'First', email: uniqueEmail(), role: 'student', associatedId: 'stu_02',
+    });
+    await expect(provisionAccount(superAdmin, {
+      name: 'Second', email: uniqueEmail(), role: 'student', associatedId: 'stu_02',
+    })).rejects.toThrow(/already exists/);
+
+    await provisionAccount(superAdmin, {
+      name: 'Parent One', email: uniqueEmail(), role: 'parent', associatedId: 'stu_02',
+    });
+    await expect(provisionAccount(superAdmin, {
+      name: 'Parent Two', email: uniqueEmail(), role: 'parent', associatedId: 'stu_02',
+    })).rejects.toThrow(/already exists/);
+  });
+});
+
 describe('policy enforcement inside the service', () => {
-  it('denies forbidden actors and roles, allows a teacher within assigned classes', async () => {
+  it('denies forbidden actors and roles', async () => {
     await seedAccountsIfMissing();
     await expect(provisionAccount(actorFor('student'), {
       name: 'Nope', email: uniqueEmail(), role: 'teacher',
@@ -139,14 +195,21 @@ describe('policy enforcement inside the service', () => {
     await expect(provisionAccount(actorFor('admin'), {
       name: 'Nope', email: uniqueEmail(), role: 'admin',
     })).rejects.toThrow(AccountPolicyError);
-    await expect(provisionAccount(teacher, {
-      name: 'Nope', email: uniqueEmail(), role: 'student', studentClassId: 'cls_11',
-    })).rejects.toThrow(AccountPolicyError);
+  });
 
-    const allowed = await provisionAccount(teacher, {
-      name: 'Assigned Student', email: uniqueEmail(), role: 'student', studentClassId: 'cls_10',
-    });
-    expect(allowed.user.role).toBe('student');
+  it('rejects forged actor ids and forged roles', async () => {
+    await seedAccountsIfMissing();
+    await expect(provisionAccount(
+      { ...superAdmin, id: 'usr_made_up' },
+      { name: 'Fake', email: uniqueEmail(), role: 'teacher' },
+    )).rejects.toThrow(AccountPolicyError);
+
+    const forgedTeacher = { ...teacher, role: 'super_admin' as const };
+    await expect(provisionAccount(forgedTeacher, {
+      name: 'Fake Admin', email: uniqueEmail(), role: 'admin',
+    })).rejects.toThrow(AccountPolicyError);
+    await expect(resetPassword(forgedTeacher, actorFor('admin').id))
+      .rejects.toThrow(AccountPolicyError);
   });
 
   it('enforces the same policy on resetPassword', async () => {
@@ -156,8 +219,7 @@ describe('policy enforcement inside the service', () => {
     await expect(resetPassword(superAdmin, superAdmin.id)).rejects.toThrow(AccountPolicyError);
 
     const created = await provisionAccount(teacher, {
-      name: 'Reset Me', email: uniqueEmail(), role: 'student',
-      associatedId: 'stu_01', studentClassId: 'cls_10',
+      name: 'Reset Me', email: uniqueEmail(), role: 'student', associatedId: 'stu_08',
     });
     const reset = await resetPassword(teacher, created.user.id);
     expect(reset.temporaryPassword).not.toBe(created.temporaryPassword);
@@ -168,7 +230,7 @@ describe('resetPassword', () => {
   it('invalidates the old password, enables the new one and flags mustChangePassword', async () => {
     await seedAccountsIfMissing();
     const created = await provisionAccount(superAdmin, {
-      name: 'Resettable', email: uniqueEmail(), role: 'student',
+      name: 'Resettable', email: uniqueEmail(), role: 'student', associatedId: 'stu_02',
     });
     expect(await verifyLogin(created.user.email, created.temporaryPassword)).not.toBeNull();
 
@@ -186,7 +248,7 @@ describe('changePassword', () => {
   it('rejects bad current password and weak/new-equal passwords, then succeeds', async () => {
     await seedAccountsIfMissing();
     const created = await provisionAccount(superAdmin, {
-      name: 'Changer', email: uniqueEmail(), role: 'student',
+      name: 'Changer', email: uniqueEmail(), role: 'student', associatedId: 'stu_03',
     });
     const current = created.temporaryPassword;
 
@@ -204,13 +266,43 @@ describe('changePassword', () => {
     expect(await verifyLogin(created.user.email, 'BrandNew123')).not.toBeNull();
     expect(await verifyLogin(created.user.email, current)).toBeNull();
   });
+
+  it('locks after five wrong current passwords and recovers after a correct one', async () => {
+    vi.useFakeTimers();
+    await seedAccountsIfMissing();
+    const created = await provisionAccount(superAdmin, {
+      name: 'Change Locked', email: uniqueEmail(), role: 'teacher',
+    });
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await expect(changePassword(created.user.id, 'WrongCurrent1', 'BrandNew123'))
+        .rejects.toThrow(/Current password is incorrect/);
+    }
+    expect(getLockRemainingMs(created.user.email)).toBeGreaterThan(0);
+    await expect(changePassword(created.user.id, created.temporaryPassword, 'BrandNew123'))
+      .rejects.toThrow(/Too many failed attempts/);
+
+    vi.advanceTimersByTime(31_000);
+    expect(getLockRemainingMs(created.user.email)).toBe(0);
+    await changePassword(created.user.id, created.temporaryPassword, 'BrandNew123');
+    expect(getLockRemainingMs(created.user.email)).toBe(0);
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await expect(changePassword(created.user.id, 'WrongCurrent1', 'Another123'))
+        .rejects.toThrow(/Current password is incorrect/);
+    }
+    expect(getLockRemainingMs(created.user.email)).toBe(0);
+    await expect(changePassword(created.user.id, 'WrongCurrent1', 'Another123'))
+      .rejects.toThrow(/Current password is incorrect/);
+    expect(getLockRemainingMs(created.user.email)).toBeGreaterThan(0);
+  });
 });
 
 describe('audit log', () => {
   it('records provision / reset / change without any password material', async () => {
     await seedAccountsIfMissing();
     const created = await provisionAccount(superAdmin, {
-      name: 'Audited', email: uniqueEmail(), role: 'student',
+      name: 'Audited', email: uniqueEmail(), role: 'student', associatedId: 'stu_04',
     });
     const reset = await resetPassword(superAdmin, created.user.id);
     await changePassword(created.user.id, reset.temporaryPassword, 'AuditPass123');
@@ -232,7 +324,7 @@ describe('login and throttling after provisioning', () => {
   it('logs in with the temp password and locks after five wrong attempts', async () => {
     await seedAccountsIfMissing();
     const created = await provisionAccount(superAdmin, {
-      name: 'Throttled', email: uniqueEmail(), role: 'student',
+      name: 'Throttled', email: uniqueEmail(), role: 'student', associatedId: 'stu_05',
     });
     expect(await verifyLogin(created.user.email, created.temporaryPassword)).not.toBeNull();
 
@@ -244,7 +336,7 @@ describe('login and throttling after provisioning', () => {
   });
 });
 
-describe('seeded access', () => {
+describe('seeded access and demo reset', () => {
   it('seeds one account per user and all seeded roles exist', async () => {
     await seedAccountsIfMissing();
     const accounts = JSON.parse(localStorage.getItem('smc_accounts') ?? '[]');
@@ -252,5 +344,25 @@ describe('seeded access', () => {
     for (const role of ROLES) {
       expect(actorFor(role)).toBeTruthy();
     }
+  });
+
+  it('resetAllToDemo clears accounts/audit and re-seeds matching logins', async () => {
+    await seedAccountsIfMissing();
+    const created = await provisionAccount(superAdmin, {
+      name: 'To Be Reset', email: uniqueEmail(), role: 'teacher',
+    });
+    expect(findAccountByUserId(created.user.id)).not.toBeNull();
+
+    StorageService.resetAllToDemo();
+    expect(localStorage.getItem('smc_accounts')).toBeNull();
+    expect(localStorage.getItem('smc_audit_log')).toBeNull();
+
+    await seedAccountsIfMissing();
+    const users = StorageService.getUsers();
+    const accounts = JSON.parse(localStorage.getItem('smc_accounts') ?? '[]');
+    expect(accounts).toHaveLength(users.length);
+    expect(accounts.every((account: { userId: string }) => users.some((u) => u.id === account.userId))).toBe(true);
+    expect(await verifyLogin('alexander.cross@staugustine.edu', DEMO_PASSWORD)).toMatchObject({ role: 'super_admin' });
+    expect(await verifyLogin(created.user.email, created.temporaryPassword)).toBeNull();
   });
 });

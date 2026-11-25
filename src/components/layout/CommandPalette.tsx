@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext.tsx';
+import { canViewAsRole, useAuth } from '../../context/AuthContext.tsx';
 import { useApp } from '../../context/AppContext.tsx';
 import {
   Search,
@@ -29,7 +29,7 @@ interface CommandPaletteProps {
 export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
   const [query, setQuery] = useState('');
   const navigate = useNavigate();
-  const { switchRole } = useAuth();
+  const { viewAs, actualUser } = useAuth();
   const { students, teachers, toggleTheme } = useApp();
 
   useEffect(() => {
@@ -62,14 +62,17 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
     { label: 'Go to System Administration', icon: <Settings className="w-4 h-4" />, action: () => navigate('/settings') },
   ];
 
-  const roleCommands: { label: string; role: Role }[] = [
-    { label: 'Switch to Super Admin View', role: 'super_admin' },
-    { label: 'Switch to Principal View', role: 'principal' },
-    { label: 'Switch to Teacher View', role: 'teacher' },
-    { label: 'Switch to Student View', role: 'student' },
-    { label: 'Switch to Parent View', role: 'parent' },
-    { label: 'Switch to Accountant View', role: 'accountant' },
+  const allRoleCommands: { label: string; role: Role }[] = [
+    { label: 'View as Super Admin', role: 'super_admin' },
+    { label: 'View as Principal', role: 'principal' },
+    { label: 'View as Teacher', role: 'teacher' },
+    { label: 'View as Student', role: 'student' },
+    { label: 'View as Parent', role: 'parent' },
+    { label: 'View as Accountant', role: 'accountant' },
   ];
+  const roleCommands = allRoleCommands.filter((command) =>
+    canViewAsRole(actualUser.role, command.role),
+  );
 
   const matchedStudents = query
     ? students.filter(
@@ -229,28 +232,30 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
             </div>
           )}
 
-          {/* Role Switching */}
-          <div>
-            <p className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 light:text-slate-600">
-              Switch Experience (Demo)
-            </p>
-            <div className="mt-1 space-y-0.5">
-              {roleCommands.map((rc, idx) => (
-                <button
-                  key={idx}
-                  onClick={() =>
-                    executeAction(() => {
-                      switchRole(rc.role);
-                    })
-                  }
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-xs text-slate-200 light:text-slate-800 hover:bg-slate-800/60 light:hover:bg-slate-100 transition-colors"
-                >
-                  <UserCheck className="w-4 h-4 text-indigo-400 light:text-indigo-600" />
-                  <span>{rc.label}</span>
-                </button>
-              ))}
+          {/* View as - admins only */}
+          {roleCommands.length > 0 && (
+            <div>
+              <p className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 light:text-slate-600">
+                View as (Admin)
+              </p>
+              <div className="mt-1 space-y-0.5">
+                {roleCommands.map((rc, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() =>
+                      executeAction(() => {
+                        viewAs(rc.role);
+                      })
+                    }
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-xs text-slate-200 light:text-slate-800 hover:bg-slate-800/60 light:hover:bg-slate-100 transition-colors"
+                  >
+                    <UserCheck className="w-4 h-4 text-indigo-400 light:text-indigo-600" />
+                    <span>{rc.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         <div className="px-4 py-2 bg-slate-900/60 light:bg-slate-100 border-t border-slate-800 light:border-slate-200 flex items-center justify-between text-[11px] text-slate-400 light:text-slate-600">

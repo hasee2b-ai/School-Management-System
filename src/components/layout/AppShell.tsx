@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar.tsx';
 import { Topbar } from './Topbar.tsx';
 import { CommandPalette } from './CommandPalette.tsx';
+import { ViewAsBanner } from './ViewAsBanner.tsx';
 import { ToastContainer } from '../common/ToastContainer.tsx';
 
 const ROUTE_TITLES: Record<string, string> = {
@@ -51,6 +52,8 @@ export const AppShell: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-transparent light:bg-[#f8fafc] text-slate-100 light:text-slate-900 flex flex-col font-sans transition-colors duration-200">
+      <ViewAsBanner />
+
       <Sidebar
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}

@@ -1,90 +1,142 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Role } from '../types/index.ts';
-import { INITIAL_USERS } from '../data/mockData.ts';
+import { StorageService } from '../services/storage.ts';
+import { getMustChangePassword, seedAccountsIfMissing, verifyLogin } from '../services/authService.ts';
 
 interface AuthContextType {
-  currentUser: User;
-  currentRole: Role;
-  switchRole: (role: Role) => void;
+  currentUser: User; // effective user (the view-as user when viewing as)
+  currentRole: Role; // effective role
+  actualUser: User; // the real signed-in user
+  isViewingAs: boolean;
+  viewAsRole: Role | null;
+  viewAs: (role: Role) => boolean;
+  exitViewAs: () => void;
   availableUsers: User[];
-  loginAs: (user: User) => void;
+  loginAs: (user: User) => void; // demo tiles only; no-op when demo mode is off
+  login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
   isAuthenticated: boolean;
+  mustChangePassword: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const AUTH_USER_KEY = 'smc_auth_user';
+const SESSION_MAX_AGE_MS = 8 * 60 * 60 * 1000;
+const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
 
-// A saved session is only valid if it parses and its id matches a canonical user.
-function readSavedUser(): User | null {
+interface SavedSession {
+  id: string;
+  loginAt: number;
+}
+
+/** Single permission rule shared by the guard and the view-as UI. */
+export function canViewAsRole(actualRole: Role, targetRole: Role): boolean {
+  if (actualRole === 'super_admin') return targetRole !== 'super_admin';
+  if (actualRole === 'admin') return targetRole !== 'super_admin' && targetRole !== 'admin';
+  return false;
+}
+
+function readSavedSession(): User | null {
   try {
-    const saved = localStorage.getItem(AUTH_USER_KEY);
-    if (!saved) return null;
-    const parsed = JSON.parse(saved) as { id?: unknown } | null;
+    const raw = localStorage.getItem(AUTH_USER_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<SavedSession> | null;
     if (!parsed || typeof parsed.id !== 'string') return null;
-    return INITIAL_USERS.find((u) => u.id === parsed.id) ?? null;
+    if (typeof parsed.loginAt !== 'number' || !Number.isFinite(parsed.loginAt)) return null;
+    const age = Date.now() - parsed.loginAt;
+    if (age > SESSION_MAX_AGE_MS || age < 0) return null;
+    // Restore the canonical user; never trust fields from storage.
+    return StorageService.getUsers().find((user) => user.id === parsed.id) ?? null;
   } catch {
     return null;
   }
 }
 
-function persistUser(user: User): void {
+function persistSession(user: User): void {
   try {
-    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
+    const session: SavedSession = { id: user.id, loginAt: Date.now() };
+    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(session));
   } catch (e) {
-    console.warn('Could not save auth user', e);
+    console.warn('Could not save session', e);
   }
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Keep currentUser non-null (placeholder until login) and gate the UI with isAuthenticated.
-  // This avoids touching every consumer that reads currentUser.name / .role / .id.
   const [session, setSession] = useState(() => {
-    const saved = readSavedUser();
-    return {
-      user: saved ?? INITIAL_USERS[0],
-      isAuthenticated: saved !== null,
-    };
+    const user = readSavedSession();
+    return { user, isAuthenticated: user !== null };
   });
+  const [viewAsRole, setViewAsRole] = useState<Role | null>(null);
 
-  const { user: currentUser, isAuthenticated } = session;
+  // Seed accounts once when the provider mounts.
+  useEffect(() => {
+    void seedAccountsIfMissing();
+  }, []);
 
-  const switchRole = (role: Role) => {
-    const targetUser = INITIAL_USERS.find((u) => u.role === role) || {
-      id: `usr_${role}`,
-      name: `${role.replace('_', ' ').toUpperCase()} User`,
-      email: `${role}@staugustine.edu`,
-      role,
-    };
-    persistUser(targetUser);
-    setSession({ user: targetUser, isAuthenticated: true });
+  const users = StorageService.getUsers();
+  const actualUser = session.user ?? users[0]; // placeholder while logged out
+  const effectiveUser = viewAsRole
+    ? users.find((user) => user.role === viewAsRole) ?? actualUser
+    : actualUser;
+  const { isAuthenticated } = session;
+  const isViewingAs = viewAsRole !== null && isAuthenticated;
+
+  const startSession = (user: User) => {
+    persistSession(user);
+    setSession({ user, isAuthenticated: true });
+    setViewAsRole(null);
+  };
+
+  const login = async (email: string, password: string): Promise<boolean> => {
+    const user = await verifyLogin(email, password);
+    if (!user) return false;
+    startSession(user);
+    return true;
   };
 
   const loginAs = (user: User) => {
-    persistUser(user);
-    setSession({ user, isAuthenticated: true });
+    if (!DEMO_MODE) return;
+    startSession(user);
+  };
+
+  const viewAs = (role: Role): boolean => {
+    if (!isAuthenticated || !canViewAsRole(actualUser.role, role)) return false;
+    if (!StorageService.getUsers().some((user) => user.role === role)) return false;
+    setViewAsRole(role);
+    return true;
+  };
+
+  const exitViewAs = () => {
+    setViewAsRole(null);
   };
 
   const logout = () => {
     try {
       localStorage.removeItem(AUTH_USER_KEY);
     } catch (e) {
-      console.warn('Could not clear saved auth user', e);
+      console.warn('Could not clear session', e);
     }
-    setSession((prev) => ({ ...prev, isAuthenticated: false }));
+    setSession({ user: null, isAuthenticated: false });
+    setViewAsRole(null);
   };
 
   return (
     <AuthContext.Provider
       value={{
-        currentUser,
-        currentRole: currentUser.role,
-        switchRole,
-        availableUsers: INITIAL_USERS,
+        currentUser: effectiveUser,
+        currentRole: effectiveUser.role,
+        actualUser,
+        isViewingAs,
+        viewAsRole: isViewingAs ? viewAsRole : null,
+        viewAs,
+        exitViewAs,
+        availableUsers: users,
         loginAs,
+        login,
         logout,
         isAuthenticated,
+        mustChangePassword: isAuthenticated && getMustChangePassword(actualUser.id),
       }}
     >
       {children}

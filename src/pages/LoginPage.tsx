@@ -1,37 +1,47 @@
 import React, { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.tsx';
-import { User, Role } from '../types/index.ts';
+import { User } from '../types/index.ts';
 import { Button } from '../components/common/Button.tsx';
 import { Input } from '../components/common/Input.tsx';
-import { Shield, Sparkles, Check, ArrowRight, Lock } from 'lucide-react';
+import { getLockRemainingMs, DEMO_PASSWORD } from '../services/authService.ts';
+import { Shield, Sparkles } from 'lucide-react';
+
+const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
+const GENERIC_ERROR = 'Invalid email or password';
+
+const throttleMessage = (ms: number) =>
+  `Too many failed attempts. Try again in ${Math.max(1, Math.ceil(ms / 1000))} seconds.`;
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
-  const { availableUsers, loginAs, switchRole, isAuthenticated } = useAuth();
+  const { availableUsers, loginAs, login, isAuthenticated } = useAuth();
 
-  const [email, setEmail] = useState('alexander.cross@staugustine.edu');
-  const [password, setPassword] = useState('••••••••••••');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
   if (isAuthenticated) {
     return <Navigate to="/" replace />;
   }
 
-  const handleCustomLogin = (e: React.FormEvent) => {
+  const handleCustomLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!password.trim()) {
-      setError('Please enter a password to continue.');
+    const remainingBefore = getLockRemainingMs(email);
+    if (remainingBefore > 0) {
+      setError(throttleMessage(remainingBefore));
       return;
     }
-    const matched = availableUsers.find((u) => u.email.toLowerCase() === email.trim().toLowerCase());
-    if (!matched) {
-      setError('No account found for this email');
-      return;
-    }
+
     setError('');
-    loginAs(matched);
-    navigate('/');
+    const signedIn = await login(email, password);
+    if (signedIn) {
+      navigate('/');
+      return;
+    }
+
+    const remainingAfter = getLockRemainingMs(email);
+    setError(remainingAfter > 0 ? throttleMessage(remainingAfter) : GENERIC_ERROR);
   };
 
   const handleQuickLogin = (user: User) => {
@@ -83,7 +93,11 @@ export const LoginPage: React.FC = () => {
                   href="#forgot"
                   onClick={(e) => {
                     e.preventDefault();
-                    alert('Demo Mode: Click any role below for instant 1-click access.');
+                    alert(
+                      DEMO_MODE
+                        ? `Demo mode: seeded accounts use ${DEMO_PASSWORD} or a 1-click role below.`
+                        : 'This is a client-side demo. Contact your administrator for access.',
+                    );
                   }}
                   className="text-[11px] text-indigo-400 light:text-indigo-600 hover:underline"
                 >
@@ -112,37 +126,39 @@ export const LoginPage: React.FC = () => {
           </form>
 
           <p className="mt-3 text-center text-[11px] text-slate-400 light:text-slate-600">
-            Demo mode — any password works; or use a 1-click role below.
+            Simulated client-side sign-in{DEMO_MODE ? ` · demo password: ${DEMO_PASSWORD}` : ''}.
           </p>
 
-          {/* Quick Demo Accounts Selection */}
-          <div className="mt-8 pt-6 border-t border-slate-800/80 light:border-slate-200">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400 light:text-slate-600 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-indigo-400 light:text-indigo-600" />
-                Demo 1-Click Role Access
-              </span>
-              <span className="text-[10px] text-slate-400 light:text-slate-600 font-mono">Select persona</span>
-            </div>
+          {/* Quick demo accounts - only when VITE_DEMO_MODE=true */}
+          {DEMO_MODE && (
+            <div className="mt-8 pt-6 border-t border-slate-800/80 light:border-slate-200">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400 light:text-slate-600 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-400 light:text-indigo-600" />
+                  Demo mode · 1-Click Role Access
+                </span>
+                <span className="text-[10px] text-slate-400 light:text-slate-600 font-mono">Select persona</span>
+              </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {availableUsers.map((user) => (
-                <button
-                  key={user.id}
-                  type="button"
-                  onClick={() => handleQuickLogin(user)}
-                  className="p-2.5 rounded-lg bg-slate-900/60 hover:bg-indigo-950/40 border border-slate-800/80 hover:border-indigo-500/50 light:bg-slate-50 light:hover:bg-indigo-50/70 light:border-slate-200 text-left transition-all duration-150 group"
-                >
-                  <p className="text-xs font-bold text-slate-200 light:text-slate-900 group-hover:text-indigo-300 light:group-hover:text-indigo-700 capitalize truncate">
-                    {user.role.replace('_', ' ')}
-                  </p>
-                  <p className="text-[10px] text-slate-400 light:text-slate-600 truncate mt-0.5">
-                    {user.name}
-                  </p>
-                </button>
-              ))}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {availableUsers.map((user) => (
+                  <button
+                    key={user.id}
+                    type="button"
+                    onClick={() => handleQuickLogin(user)}
+                    className="p-2.5 rounded-lg bg-slate-900/60 hover:bg-indigo-950/40 border border-slate-800/80 hover:border-indigo-500/50 light:bg-slate-50 light:hover:bg-indigo-50/70 light:border-slate-200 text-left transition-all duration-150 group"
+                  >
+                    <p className="text-xs font-bold text-slate-200 light:text-slate-900 group-hover:text-indigo-300 light:group-hover:text-indigo-700 capitalize truncate">
+                      {user.role.replace('_', ' ')}
+                    </p>
+                    <p className="text-[10px] text-slate-400 light:text-slate-600 truncate mt-0.5">
+                      {user.name}
+                    </p>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Footer info */}

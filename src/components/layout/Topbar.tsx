@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext.tsx';
+import { canViewAsRole, useAuth } from '../../context/AuthContext.tsx';
 import { useApp } from '../../context/AppContext.tsx';
 import {
   Menu,
@@ -29,7 +29,7 @@ export const Topbar: React.FC<TopbarProps> = ({
   title = 'Dashboard',
   sidebarOpen = false,
 }) => {
-  const { currentUser, currentRole, switchRole, logout } = useAuth();
+  const { currentRole, actualUser, viewAs, logout } = useAuth();
   const navigate = useNavigate();
   const {
     theme,
@@ -73,6 +73,9 @@ export const Topbar: React.FC<TopbarProps> = ({
     { role: 'librarian', label: 'Librarian', desc: 'Catalog & book loans' },
     { role: 'transport_manager', label: 'Transport Mgr', desc: 'Bus routes & fleet dispatch' },
   ];
+
+  // Only admins may view as another role; the same rule is enforced by viewAs().
+  const viewableRoles = rolesList.filter((item) => canViewAsRole(actualUser.role, item.role));
 
   return (
     <header className="sticky top-0 z-30 h-16 glass-panel border-b border-slate-800/80 light:border-slate-300 light:bg-white/95 px-4 sm:px-6 flex items-center justify-between gap-4">
@@ -208,7 +211,7 @@ export const Topbar: React.FC<TopbarProps> = ({
           <button
             onClick={() => setRoleMenuOpen((prev) => !prev)}
             className="flex items-center gap-2 px-2 py-1.5 bg-transparent text-slate-100 light:text-slate-900 text-xs font-semibold cursor-pointer"
-            aria-label="Switch demo role"
+            aria-label="Account menu"
           >
             <span className="hidden md:inline font-mono capitalize">
               {currentRole.replace('_', ' ')}
@@ -220,36 +223,38 @@ export const Topbar: React.FC<TopbarProps> = ({
             <div className="absolute right-0 mt-2 w-72 rounded-xl glass-dropdown border border-slate-700/80 light:border-slate-300 light:bg-white shadow-2xl py-2 z-50 animate-in fade-in zoom-in-95 duration-150">
               <div className="px-3.5 py-2 border-b border-slate-800 light:border-slate-200">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 light:text-slate-600">
-                  Switch Role (Live Demo)
+                  {viewableRoles.length > 0 ? 'Switch / View as' : 'Signed in'}
                 </p>
                 <p className="text-[11px] text-slate-400 light:text-slate-600 mt-0.5">
-                  Logged in as <strong className="text-slate-200 light:text-slate-900">{currentUser.name}</strong>
+                  {actualUser.name} · <span className="capitalize">{actualUser.role.replace('_', ' ')}</span>
                 </p>
               </div>
 
-              <div className="max-h-80 overflow-y-auto py-1">
-                {rolesList.map((item) => {
-                  const isSelected = currentRole === item.role;
-                  return (
-                    <button
-                      key={item.role}
-                      onClick={() => {
-                        switchRole(item.role);
-                        setRoleMenuOpen(false);
-                      }}
-                      className={`w-full text-left px-3.5 py-2 flex items-center justify-between hover:bg-slate-800/60 light:hover:bg-slate-100 transition-colors ${
-                        isSelected ? 'bg-indigo-600/10 text-indigo-300 light:bg-indigo-50 light:text-indigo-700' : 'text-slate-300 light:text-slate-700'
-                      }`}
-                    >
-                      <div>
-                        <p className="text-xs font-semibold">{item.label}</p>
-                        <p className="text-[10px] text-slate-400 light:text-slate-600">{item.desc}</p>
-                      </div>
-                      {isSelected && <Check className="w-4 h-4 text-indigo-400 light:text-indigo-600 shrink-0" />}
-                    </button>
-                  );
-                })}
-              </div>
+              {viewableRoles.length > 0 && (
+                <div className="max-h-80 overflow-y-auto py-1">
+                  {viewableRoles.map((item) => {
+                    const isSelected = currentRole === item.role;
+                    return (
+                      <button
+                        key={item.role}
+                        onClick={() => {
+                          viewAs(item.role);
+                          setRoleMenuOpen(false);
+                        }}
+                        className={`w-full text-left px-3.5 py-2 flex items-center justify-between hover:bg-slate-800/60 light:hover:bg-slate-100 transition-colors ${
+                          isSelected ? 'bg-indigo-600/10 text-indigo-300 light:bg-indigo-50 light:text-indigo-700' : 'text-slate-300 light:text-slate-700'
+                        }`}
+                      >
+                        <div>
+                          <p className="text-xs font-semibold">{item.label}</p>
+                          <p className="text-[10px] text-slate-400 light:text-slate-600">{item.desc}</p>
+                        </div>
+                        {isSelected && <Check className="w-4 h-4 text-indigo-400 light:text-indigo-600 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               <div className="px-2 pt-2 border-t border-slate-800 light:border-slate-200">
                 <button

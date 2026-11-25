@@ -15,8 +15,11 @@ import {
   Announcement,
   NotificationItem,
   SchoolSettings,
+  User,
+  Role,
 } from '../types/index.ts';
 import {
+  INITIAL_USERS,
   INITIAL_STUDENTS,
   INITIAL_TEACHERS,
   INITIAL_CLASSES,
@@ -59,7 +62,46 @@ function save<T>(key: string, data: T): void {
   }
 }
 
+const VALID_ROLES: Role[] = [
+  'super_admin', 'admin', 'principal', 'teacher', 'student', 'parent',
+  'accountant', 'librarian', 'transport_manager',
+];
+
+function isUser(value: unknown): value is User {
+  if (!value || typeof value !== 'object') return false;
+  const user = value as Record<string, unknown>;
+  return (
+    typeof user.id === 'string' && user.id.length > 0 &&
+    typeof user.name === 'string' && user.name.length > 0 &&
+    typeof user.email === 'string' && user.email.length > 0 &&
+    typeof user.role === 'string' && VALID_ROLES.includes(user.role as Role) &&
+    (user.associatedId === undefined || typeof user.associatedId === 'string')
+  );
+}
+
+/** Users are dynamic (provisioned accounts live here); corrupt data is re-seeded. */
+function getUsers(): User[] {
+  try {
+    const raw = localStorage.getItem(PREFIX + 'users');
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(isUser)) {
+        const ids = new Set(parsed.map((user) => user.id));
+        if (ids.size === parsed.length) return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn('Failed reading users from localStorage, using seed data', e);
+  }
+  const seeded = INITIAL_USERS.map((user) => ({ ...user }));
+  save('users', seeded);
+  return seeded;
+}
+
 export const StorageService = {
+  getUsers,
+  saveUsers: (data: User[]) => save('users', data),
+
   getStudents: (): Student[] => getOrInit('students', INITIAL_STUDENTS),
   saveStudents: (data: Student[]) => save('students', data),
 
@@ -109,6 +151,7 @@ export const StorageService = {
   saveSettings: (data: SchoolSettings) => save('settings', data),
 
   resetAllToDemo: (): void => {
+    save('users', INITIAL_USERS);
     save('students', INITIAL_STUDENTS);
     save('teachers', INITIAL_TEACHERS);
     save('classes', INITIAL_CLASSES);

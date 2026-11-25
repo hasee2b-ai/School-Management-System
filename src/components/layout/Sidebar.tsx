@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { useApp } from '../../context/AppContext.tsx';
+import { ROUTE_ACCESS } from '../../config/access.ts';
 import {
   LayoutDashboard,
   Users,
@@ -21,7 +22,6 @@ import {
   Shield,
   UserCheck,
 } from 'lucide-react';
-import { Role } from '../../types/index.ts';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -32,7 +32,6 @@ interface NavItemConfig {
   to: string;
   label: string;
   icon: React.ReactNode;
-  allowedRoles: Role[];
   badge?: number;
 }
 
@@ -47,115 +46,88 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const activeAssignments = assignments.length;
   const pinnedNotices = announcements.filter((a) => a.pinned).length;
 
-  const ALL_ROLES: Role[] = [
-    'super_admin',
-    'admin',
-    'principal',
-    'teacher',
-    'student',
-    'parent',
-    'accountant',
-    'librarian',
-    'transport_manager',
-  ];
-
   const navItems: NavItemConfig[] = [
     {
       to: '/',
       label: 'Dashboard',
       icon: <LayoutDashboard className="w-5 h-5 shrink-0" />,
-      allowedRoles: ALL_ROLES,
     },
     {
       to: '/students',
       label: 'Students',
       icon: <GraduationCap className="w-5 h-5 shrink-0" />,
-      allowedRoles: ['super_admin', 'admin', 'principal', 'teacher'],
     },
     {
       to: '/teachers',
       label: 'Teachers & Staff',
       icon: <Users className="w-5 h-5 shrink-0" />,
-      allowedRoles: ['super_admin', 'admin', 'principal'],
     },
     {
       to: '/classes',
       label: 'Classes & Sections',
       icon: <Layers className="w-5 h-5 shrink-0" />,
-      allowedRoles: ['super_admin', 'admin', 'principal', 'teacher'],
     },
     {
       to: '/subjects',
       label: 'Subjects',
       icon: <BookOpen className="w-5 h-5 shrink-0" />,
-      allowedRoles: ['super_admin', 'admin', 'principal'],
     },
     {
       to: '/attendance',
       label: 'Attendance',
       icon: <CalendarCheck2 className="w-5 h-5 shrink-0" />,
-      allowedRoles: ['super_admin', 'admin', 'principal', 'teacher', 'student', 'parent'],
     },
     {
       to: '/timetable',
       label: 'Timetable',
       icon: <Clock className="w-5 h-5 shrink-0" />,
-      allowedRoles: ALL_ROLES,
     },
     {
       to: '/exams',
       label: 'Exams & Results',
       icon: <Award className="w-5 h-5 shrink-0" />,
-      allowedRoles: ['super_admin', 'admin', 'principal', 'teacher', 'student', 'parent'],
     },
     {
       to: '/assignments',
       label: 'Assignments',
       icon: <FileSpreadsheet className="w-5 h-5 shrink-0" />,
-      allowedRoles: ['super_admin', 'admin', 'principal', 'teacher', 'student'],
       badge: activeAssignments > 0 ? activeAssignments : undefined,
     },
     {
       to: '/fees',
       label: 'Fees & Finance',
       icon: <Receipt className="w-5 h-5 shrink-0" />,
-      allowedRoles: ['super_admin', 'admin', 'principal', 'accountant', 'student', 'parent'],
       badge: pendingInvoices > 0 ? pendingInvoices : undefined,
     },
     {
       to: '/library',
       label: 'Library',
       icon: <Library className="w-5 h-5 shrink-0" />,
-      allowedRoles: ['super_admin', 'admin', 'principal', 'librarian', 'teacher', 'student'],
     },
     {
       to: '/transport',
       label: 'Transport',
       icon: <Bus className="w-5 h-5 shrink-0" />,
-      allowedRoles: ['super_admin', 'admin', 'principal', 'transport_manager', 'parent', 'student'],
     },
     {
       to: '/communication',
       label: 'Notices & Board',
       icon: <Megaphone className="w-5 h-5 shrink-0" />,
-      allowedRoles: ALL_ROLES,
       badge: pinnedNotices > 0 ? pinnedNotices : undefined,
     },
     {
       to: '/reports',
       label: 'Reports & Analytics',
       icon: <BarChart3 className="w-5 h-5 shrink-0" />,
-      allowedRoles: ['super_admin', 'admin', 'principal', 'accountant'],
     },
     {
       to: '/settings',
       label: 'Administration',
       icon: <Settings className="w-5 h-5 shrink-0" />,
-      allowedRoles: ['super_admin', 'admin', 'principal'],
     },
   ];
 
-  const visibleItems = navItems.filter((item) => item.allowedRoles.includes(currentRole));
+  const visibleItems = navItems.filter((item) => ROUTE_ACCESS[item.to]?.includes(currentRole));
 
   // Close sidebar on Escape key
   useEffect(() => {
